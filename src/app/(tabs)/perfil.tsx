@@ -1,5 +1,6 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
+  ActivityIndicator,
   Alert,
   Image,
   Pressable,
@@ -10,39 +11,66 @@ import {
   View,
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Ionicons } from '@expo/vector-icons';
 import { BotaoSair } from '@/components/BotaoSair';
 import { Colors } from '@/constants/colors';
 import { MOCK_USUARIO } from '@/services/mockPontos';
 
+const FOTO_OFFLINE_KEY = '@reciclaspot:foto_descarte';
+const KG_OFFLINE_KEY = '@reciclaspot:quilos_descartados';
+
 export default function PerfilScreen() {
   const [quilosDescartados, setQuilosDescartados] = useState(MOCK_USUARIO.pontosReciclagem);
   const [fotoDescarteUri, setFotoDescarteUri] = useState<string | null>(null);
+  const [carregandoCamera, setCarregandoCamera] = useState(false);
+
+  // Carrega a foto e os quilos salvos offline ao abrir o perfil
+  useEffect(() => {
+    const carregarDadosOffline = async () => {
+      try {
+        const fotoSalva = await AsyncStorage.getItem(FOTO_OFFLINE_KEY);
+        const kgSalvos = await AsyncStorage.getItem(KG_OFFLINE_KEY);
+        if (fotoSalva) setFotoDescarteUri(fotoSalva);
+        if (kgSalvos) setQuilosDescartados(Number(kgSalvos));
+      } catch (error) {
+        console.error('Erro ao ler dados offline do perfil:', error);
+      }
+    };
+    carregarDadosOffline();
+  }, []);
 
   const abrirCamera = async () => {
-    const permissao = await ImagePicker.requestCameraPermissionsAsync();
+    setCarregandoCamera(true);
+    try {
+      const permissao = await ImagePicker.requestCameraPermissionsAsync();
 
-    if (!permissao.granted) {
-      Alert.alert(
-        'Permissão necessária',
-        'Precisamos de acesso à câmera para fotografar os materiais recicláveis.'
-      );
-      return;
-    }
+      if (!permissao.granted) {
+        Alert.alert(
+          'Permissão necessária',
+          'Precisamos de acesso à câmera para fotografar os materiais recicláveis.'
+        );
+        return;
+      }
 
-    const resultado = await ImagePicker.launchCameraAsync({
-      mediaTypes: ['images'],
-      allowsEditing: true,
-      aspect: [4, 3],
-      quality: 0.8,
-    });
+      const resultado = await ImagePicker.launchCameraAsync({
+        mediaTypes: ['images'],
+        allowsEditing: true,
+        aspect: [4, 3],
+        quality: 0.8,
+      });
 
-    if (!resultado.canceled && resultado.assets.length > 0) {
-      setFotoDescarteUri(resultado.assets[0].uri);
+      if (!resultado.canceled && resultado.assets.length > 0) {
+        const uri = resultado.assets[0].uri;
+        setFotoDescarteUri(uri);
+        await AsyncStorage.setItem(FOTO_OFFLINE_KEY, uri);
+      }
+    } finally {
+      setCarregandoCamera(false);
     }
   };
 
-  const registrarDescarte = () => {
+  const registrarDescarte = async () => {
     if (!fotoDescarteUri) {
       Alert.alert(
         'Foto obrigatória',
@@ -55,8 +83,10 @@ export default function PerfilScreen() {
       return;
     }
 
-    setQuilosDescartados((prev) => prev + 2);
-    setFotoDescarteUri(null);
+    const novoTotal = quilosDescartados + 2;
+    setQuilosDescartados(novoTotal);
+    await AsyncStorage.setItem(KG_OFFLINE_KEY, String(novoTotal));
+
     Alert.alert(
       'Descarte Registrado!',
       'Foto comprovada com sucesso. +2 KG adicionados ao seu contador!'
@@ -104,7 +134,11 @@ export default function PerfilScreen() {
           </View>
         </View>
 
-        {fotoDescarteUri ? (
+        {carregandoCamera ? (
+          <View style={styles.cameraCircle}>
+            <ActivityIndicator size="large" color={Colors.white} />
+          </View>
+        ) : fotoDescarteUri ? (
           <View style={styles.previewWrapper}>
             <Image source={{ uri: fotoDescarteUri }} style={styles.previewImage} />
             <Pressable style={styles.retakeButton} onPress={abrirCamera}>

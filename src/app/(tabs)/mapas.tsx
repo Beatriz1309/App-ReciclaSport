@@ -1,10 +1,12 @@
-import React, { useState } from 'react';
-import { Pressable, SafeAreaView, StyleSheet, Text, View } from 'react-native';
-import { router } from 'expo-router';
-import { Ionicons } from '@expo/vector-icons';
 import { BotaoSair } from '@/components/BotaoSair';
 import { Colors } from '@/constants/colors';
+import { getFavoritosOffline } from '@/services/favoritosStorage';
 import { MOCK_PONTOS } from '@/services/mockPontos';
+import { PontoColeta } from '@/types';
+import { Ionicons } from '@expo/vector-icons';
+import { router, useFocusEffect } from 'expo-router';
+import { useCallback, useState } from 'react';
+import { Pressable, SafeAreaView, StyleSheet, Text, View } from 'react-native';
 
 const PINS_MAPA = [
   { id: '5', top: '28%', left: '25%', color: Colors.primary },
@@ -16,7 +18,43 @@ const PINS_MAPA = [
 ];
 
 export default function MapasScreen() {
-  const [pontoAtivo, setPontoAtivo] = useState(MOCK_PONTOS[4]);
+  const [pontosDisponiveis, setPontosDisponiveis] = useState<PontoColeta[]>(MOCK_PONTOS);
+  const [pontoAtivo, setPontoAtivo] = useState<PontoColeta | null>(
+    () => MOCK_PONTOS.at(4) ?? MOCK_PONTOS.at(0) ?? null
+  );
+
+  // Sincroniza com o armazenamento local (Modo Offline) sempre que a aba Mapas é aberta
+  useFocusEffect(
+    useCallback(() => {
+      let ativo = true;
+
+      const carregarPontosOffline = async () => {
+        const salvosOffline = await getFavoritosOffline();
+        if (!ativo) return;
+
+        // Mescla os pontos em cache offline com os dados locais
+        const mapaPorId = new Map<string, PontoColeta>();
+        MOCK_PONTOS.forEach((p) => mapaPorId.set(p.id, p));
+        salvosOffline.forEach((p) => mapaPorId.set(p.id, p));
+
+        const listaAtualizada = Array.from(mapaPorId.values());
+        setPontosDisponiveis(listaAtualizada);
+
+        setPontoAtivo((atual) => {
+          if (atual) {
+            return listaAtualizada.find((p) => p.id === atual.id) ?? atual;
+          }
+          return listaAtualizada.at(0) ?? null;
+        });
+      };
+
+      carregarPontosOffline();
+
+      return () => {
+        ativo = false;
+      };
+    }, [])
+  );
 
   return (
     <SafeAreaView style={styles.container}>
@@ -36,7 +74,7 @@ export default function MapasScreen() {
             key={pin.id}
             style={[styles.pinWrapper, { top: pin.top as any, left: pin.left as any }]}
             onPress={() => {
-              const encontrado = MOCK_PONTOS.find((p) => p.id === pin.id);
+              const encontrado = pontosDisponiveis.find((p) => p.id === pin.id);
               if (encontrado) setPontoAtivo(encontrado);
             }}>
             <Ionicons name="location" size={38} color={pin.color} />
@@ -58,36 +96,38 @@ export default function MapasScreen() {
         </View>
 
         {/* Card Flutuante Inferior */}
-        <View style={styles.bottomCard}>
-          <Text style={styles.cardTitle}>{pontoAtivo.nome}</Text>
+        {pontoAtivo && (
+          <View style={styles.bottomCard}>
+            <Text style={styles.cardTitle}>{pontoAtivo.nome}</Text>
 
-          <View style={styles.metaRow}>
-            <View style={styles.metaItem}>
-              <Ionicons name="location" size={14} color={Colors.statusClosed} />
-              <Text style={styles.metaText}>{pontoAtivo.distanciaKm}</Text>
+            <View style={styles.metaRow}>
+              <View style={styles.metaItem}>
+                <Ionicons name="location" size={14} color={Colors.statusClosed} />
+                <Text style={styles.metaText}>{pontoAtivo.distanciaKm}</Text>
+              </View>
+
+              <View style={styles.metaItem}>
+                <Ionicons name="time-outline" size={14} color={Colors.textSecondary} />
+                <Text style={styles.metaText}>{pontoAtivo.horarioFuncionamento}</Text>
+              </View>
             </View>
 
-            <View style={styles.metaItem}>
-              <Ionicons name="time-outline" size={14} color={Colors.textSecondary} />
-              <Text style={styles.metaText}>{pontoAtivo.horarioFuncionamento}</Text>
+            <View style={styles.footerRow}>
+              <View style={styles.iconsRow}>
+                <Ionicons name="phone-portrait-outline" size={16} color="#222" />
+                <Ionicons name="bulb-outline" size={16} color="#E6B83A" />
+                <Ionicons name="water" size={16} color="#D93025" />
+                <Ionicons name="battery-charging" size={16} color="#28A745" />
+              </View>
+
+              <Pressable
+                style={styles.detailButton}
+                onPress={() => router.push(`/detalhes/${pontoAtivo.id}`)}>
+                <Text style={styles.detailButtonText}>Ver Detalhes</Text>
+              </Pressable>
             </View>
           </View>
-
-          <View style={styles.footerRow}>
-            <View style={styles.iconsRow}>
-              <Ionicons name="phone-portrait-outline" size={16} color="#222" />
-              <Ionicons name="bulb-outline" size={16} color="#E6B83A" />
-              <Ionicons name="water" size={16} color="#D93025" />
-              <Ionicons name="battery-charging" size={16} color="#28A745" />
-            </View>
-
-            <Pressable
-              style={styles.detailButton}
-              onPress={() => router.push(`/detalhes/${pontoAtivo.id}`)}>
-              <Text style={styles.detailButtonText}>Ver Detalhes</Text>
-            </Pressable>
-          </View>
-        </View>
+        )}
       </View>
     </SafeAreaView>
   );
@@ -227,4 +267,3 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
 });
-

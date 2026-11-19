@@ -1,26 +1,100 @@
-import React from 'react';
-import { Image, Linking, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
-import { router, useLocalSearchParams } from 'expo-router';
-import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { BotaoSair } from '@/components/BotaoSair';
 import { Colors } from '@/constants/colors';
+import {
+  getFavoritosOffline,
+  isPontoFavorito,
+  toggleFavoritoOffline,
+} from '@/services/favoritosStorage';
 import { MOCK_PONTOS } from '@/services/mockPontos';
+import { PontoColeta } from '@/types';
+import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
+import { Image } from 'expo-image';
+import { router, useLocalSearchParams } from 'expo-router';
+import { useEffect, useState } from 'react';
+import {
+  ActivityIndicator,
+  Alert,
+  Linking,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
+
+const GOOGLE_MAPS_URL =
+  'https://www.google.com/maps/@-21.8040374,-50.8755968,15z?entry=ttu&g_ep=EgoyMDI2MTExNi4wIKXMDSoASAFQAw%3D%3D';
 
 export default function DetalhesEcopontoScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
-  const ponto = MOCK_PONTOS.find((item) => item.id === id) || MOCK_PONTOS[0];
+  const pontoInicial = MOCK_PONTOS.find((item) => item.id === id) || MOCK_PONTOS.at(0)!;
 
-  const abrirRotas = () => {
-    const url = `https://google.com{ponto.latitude},${ponto.longitude}`;
-    Linking.openURL(url);
+  const [ponto, setPonto] = useState<PontoColeta>(pontoInicial);
+  const [favoritado, setFavoritado] = useState(false);
+  const [salvandoFavorito, setSalvandoFavorito] = useState(false);
+
+  useEffect(() => {
+    const sincronizarOffline = async () => {
+      const salvosOffline = await getFavoritosOffline();
+      const pontoOffline = salvosOffline.find((item) => item.id === id);
+      const pontoMock = MOCK_PONTOS.find((item) => item.id === id);
+
+      if (pontoOffline) {
+        setPonto({
+          ...pontoOffline,
+          imagemUri: pontoMock ? pontoMock.imagemUri : pontoOffline.imagemUri,
+        });
+      } else if (pontoMock) {
+        setPonto(pontoMock);
+      }
+
+      const targetId = pontoOffline?.id ?? id ?? ponto.id;
+      const jaFavoritado = await isPontoFavorito(targetId);
+      setFavoritado(jaFavoritado);
+    };
+
+    sincronizarOffline();
+  }, [id, ponto.id]);
+
+  const handleToggleFavorito = async () => {
+    if (salvandoFavorito) return;
+
+    setSalvandoFavorito(true);
+    const novoEstado = await toggleFavoritoOffline(ponto);
+    setFavoritado(novoEstado);
+    setSalvandoFavorito(false);
+
+    Alert.alert(
+      novoEstado ? 'Adicionado aos Favoritos' : 'Removido dos Favoritos',
+      novoEstado
+        ? 'Ecoponto salvo localmente! Você pode acessá-lo mesmo sem internet.'
+        : 'Ecoponto removido da sua lista offline.'
+    );
+  };
+
+  const abrirRotas = async () => {
+    try {
+      if (Platform.OS === 'web') {
+        window.open(GOOGLE_MAPS_URL, '_blank');
+      } else {
+        await Linking.openURL(GOOGLE_MAPS_URL);
+      }
+    } catch {
+      Alert.alert(
+        'Erro ao abrir o Google Maps',
+        `Não foi possível abrir o navegador ou aplicativo do Maps.\n\nEndereço: ${ponto.endereco}`
+      );
+    }
   };
 
   return (
     <View style={styles.container}>
       <View style={styles.imageWrapper}>
         <Image
-          source={typeof ponto.imagemUri === 'string' ? { uri: ponto.imagemUri } : ponto.imagemUri}
+          source={ponto.imagemUri}
           style={styles.coverImage}
+          contentFit="cover"
         />
 
         <Pressable style={styles.backButton} onPress={() => router.back()}>
@@ -34,6 +108,32 @@ export default function DetalhesEcopontoScreen() {
 
       <ScrollView style={styles.sheet} contentContainerStyle={styles.sheetContent}>
         <Text style={styles.title}>{ponto.nome}</Text>
+
+        <Pressable
+          style={[
+            styles.favoriteButton,
+            favoritado ? styles.favoriteButtonActive : styles.favoriteButtonInactive,
+          ]}
+          onPress={handleToggleFavorito}>
+          {salvandoFavorito ? (
+            <ActivityIndicator size="small" color={Colors.white} />
+          ) : (
+            <>
+              <Ionicons
+                name={favoritado ? 'heart' : 'heart-outline'}
+                size={20}
+                color={favoritado ? Colors.white : Colors.primary}
+              />
+              <Text
+                style={[
+                  styles.favoriteButtonText,
+                  favoritado ? styles.favoriteTextActive : styles.favoriteTextInactive,
+                ]}>
+                {favoritado ? 'Remover dos Favoritos' : 'Favoritar Ponto'}
+              </Text>
+            </>
+          )}
+        </Pressable>
 
         <Text style={styles.sectionLabel}>Endereço</Text>
         <Text style={styles.sectionValue}>{ponto.endereco}</Text>
@@ -124,7 +224,36 @@ const styles = StyleSheet.create({
     fontSize: 22,
     fontWeight: '800',
     color: Colors.textPrimary,
-    marginBottom: 18,
+    marginBottom: 14,
+  },
+  favoriteButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingVertical: 11,
+    paddingHorizontal: 18,
+    borderRadius: 20,
+    borderWidth: 1.5,
+    marginBottom: 10,
+  },
+  favoriteButtonInactive: {
+    backgroundColor: Colors.white,
+    borderColor: Colors.primary,
+  },
+  favoriteButtonActive: {
+    backgroundColor: '#D93025',
+    borderColor: '#D93025',
+  },
+  favoriteButtonText: {
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  favoriteTextInactive: {
+    color: Colors.primary,
+  },
+  favoriteTextActive: {
+    color: Colors.white,
   },
   sectionLabel: {
     fontSize: 15,
